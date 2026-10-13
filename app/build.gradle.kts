@@ -46,6 +46,22 @@ android {
             .orNull
             ?.trim()
             .orEmpty()
+    val releaseSigningValues =
+        mapOf(
+            "EASYSSR_KEYSTORE_PATH" to providers.environmentVariable("EASYSSR_KEYSTORE_PATH").orNull?.trim().orEmpty(),
+            "EASYSSR_KEYSTORE_PASSWORD" to providers.environmentVariable("EASYSSR_KEYSTORE_PASSWORD").orNull.orEmpty(),
+            "EASYSSR_KEY_ALIAS" to providers.environmentVariable("EASYSSR_KEY_ALIAS").orNull?.trim().orEmpty(),
+            "EASYSSR_KEY_PASSWORD" to providers.environmentVariable("EASYSSR_KEY_PASSWORD").orNull.orEmpty(),
+        )
+    val missingReleaseSigningValues = releaseSigningValues.filterValues { it.isEmpty() }.keys
+    val releaseSigningConfigured = missingReleaseSigningValues.isEmpty()
+    val releaseSigningRequired = providers.gradleProperty("requireReleaseSigning").orNull.toBoolean()
+    require(releaseSigningConfigured || missingReleaseSigningValues.size == releaseSigningValues.size) {
+        "Incomplete release signing configuration. Set all of: ${missingReleaseSigningValues.joinToString()}"
+    }
+    require(!releaseSigningRequired || releaseSigningConfigured) {
+        "Release signing is required. Set all of: ${missingReleaseSigningValues.joinToString()}"
+    }
     require(officialSigningCertSha256.isEmpty() || officialSigningCertSha256.matches(Regex("[0-9A-F]{64}"))) {
         "officialSigningCertSha256 must be an uppercase, colon-free SHA-256 certificate fingerprint"
     }
@@ -100,6 +116,16 @@ android {
     signingConfigs {
         getByName("debug") {
         }
+        if (releaseSigningConfigured) {
+            create("release") {
+                val configuredKeystorePath = releaseSigningValues.getValue("EASYSSR_KEYSTORE_PATH")
+                val expandedKeystorePath = configuredKeystorePath.replaceFirst(Regex("^~(?=/|$)"), System.getProperty("user.home"))
+                storeFile = rootProject.file(expandedKeystorePath)
+                storePassword = releaseSigningValues.getValue("EASYSSR_KEYSTORE_PASSWORD")
+                keyAlias = releaseSigningValues.getValue("EASYSSR_KEY_ALIAS")
+                keyPassword = releaseSigningValues.getValue("EASYSSR_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -116,7 +142,12 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig =
+                if (releaseSigningConfigured) {
+                    signingConfigs.getByName("release")
+                } else {
+                    signingConfigs.getByName("debug")
+                }
         }
     }
 

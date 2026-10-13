@@ -98,6 +98,9 @@ webui_debug*
 
 /libxposed/
 
+scripts/
+gradle-daemon-jvm.properties
+
 # Local AI coding assistant state
 /.agents/
 /.claude/
