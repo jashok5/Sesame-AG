@@ -355,7 +355,9 @@ interface TaskFlowAdapter {
 
     fun onAllTasksDone(snapshot: TaskFlowSnapshot) = Unit
 
-    fun onQueryFailed(response: JSONObject) = Unit
+    fun onQueryFailed(response: JSONObject) {
+        logError("$flowName[任务查询失败] raw=$response")
+    }
 
     fun onUnknownPhase(
         item: TaskFlowItem,
@@ -387,13 +389,13 @@ interface TaskFlowAdapter {
 /** 统一任务执行流程：执行、领奖、刷新和确认进展；不负责注册持久任务调度。 */
 class TaskFlowEngine(
     private val adapter: TaskFlowAdapter,
-    private val roundSleepMs: Long = 1000L,
+    private val roundSleepMs: Long = 850L,
     private val executionState: TaskFlowExecutionState = TaskFlowExecutionState(),
 ) {
     private companion object {
         const val MAX_DYNAMIC_ROUND_LIMIT = 64
         const val DYNAMIC_ROUND_LIMIT_EXTRA = 6
-        const val ROUND_SLEEP_JITTER_MS = 1500L
+        const val ROUND_SLEEP_JITTER_MS = 1275L
     }
 
     fun run(): TaskFlowRunResult = try {
@@ -467,7 +469,7 @@ class TaskFlowEngine(
                     throw e
                 } catch (t: Throwable) {
                     TaskExecutionReport.current()?.recordException()
-                    adapter.logError("${adapter.flowName}[查询异常：${t.message}]")
+                    adapter.logError("${adapter.flowName}[任务查询异常] ${t.message}")
                     return finishRunResult(
                         completed = false,
                         progressed = progressedAny,
@@ -1275,7 +1277,8 @@ class TaskFlowEngine(
             buildString {
                 append(adapter.flowName)
                 when {
-                    interrupted || failureCount > 0 -> append("[本轮动作失败(含可重试)]")
+                    failureCount > 0 -> append("[本轮动作失败(含可重试)]")
+                    interrupted -> append("[本轮中断]")
                     completed -> append("[本轮完成]")
                     noProgressSuccess && !progressed -> append("[本轮动作已受理但未确认进展]")
                     else -> append("[本轮明确延后]")
@@ -1305,7 +1308,7 @@ class TaskFlowEngine(
                     append("[中断]")
                 }
             }
-        if (!interrupted && failureCount == 0) {
+        if (failureCount == 0) {
             adapter.logInfo(summary)
         } else {
             adapter.logError(summary)

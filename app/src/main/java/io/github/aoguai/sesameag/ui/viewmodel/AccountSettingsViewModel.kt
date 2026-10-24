@@ -445,7 +445,11 @@ class AccountSettingsViewModel(
         }
     }
 
-    private fun loadAccount(): AccountSettingsUiState = synchronized(Config) {
+    private fun loadAccount(): AccountSettingsUiState = io.github.aoguai.sesameag.storage.StoreAccess.transaction {
+        loadAccountLocked()
+    }
+
+    private fun loadAccountLocked(): AccountSettingsUiState {
         val normalizedUserId = AccountSlotRegistry.normalizeUserId(userId)
         require(normalizedUserId != null && normalizedUserId in Files.listExistingUserConfigIds()) {
             "账号配置不存在或账号标识无效"
@@ -502,7 +506,7 @@ class AccountSettingsViewModel(
         val pendingAuditClearKeys = fields.keys.filterTo(linkedSetOf()) {
             it.savedStateKey() in restoredAuditClears
         }
-        AccountSettingsUiState(
+        return AccountSettingsUiState(
             isLoading = false,
             groups = groups,
             drafts = mergedDrafts,
@@ -538,13 +542,10 @@ class AccountSettingsViewModel(
                 "CHOICE", "INTEGER", "MULTIPLY_INTEGER" -> require(value.trim().toIntOrNull() != null) {
                     "${field.name} 需要有效整数"
                 }
-                "SELECT_ONE" -> require(value.isBlank() || JsonUtil.toNode(value)?.isTextual == true) {
-                    "${field.name} 需要有效单选值"
-                }
-                "LIST", "SELECT" -> require(value.isBlank() || io.github.aoguai.sesameag.util.JsonUtil.toNode(value)?.isArray == true) {
+                "SELECT" -> require(value.isBlank() || io.github.aoguai.sesameag.util.JsonUtil.toNode(value)?.isArray == true) {
                     "${field.name} 需要有效数组"
                 }
-                "SELECT_AND_COUNT", "SELECT_AND_COUNT_ONE" ->
+                "SELECT_AND_COUNT" ->
                     require(value.isBlank() || io.github.aoguai.sesameag.util.JsonUtil.toNode(value)?.isObject == true) {
                         "${field.name} 需要有效对象"
                     }
@@ -693,17 +694,14 @@ private fun Any?.asMapperList(): List<MapperEntity> = when (this) {
 internal val SUPPORTED_FIELD_TYPES = setOf(
     "BOOLEAN",
     "CHOICE",
-    "SELECT_ONE",
     "INTEGER",
     "MULTIPLY_INTEGER",
     "STRING",
-    "LIST",
     "TEXT",
     "READ_TEXT",
     "URL_TEXT",
     "SELECT",
     "SELECT_AND_COUNT",
-    "SELECT_AND_COUNT_ONE",
     "FRIEND_SELECTION",
     "FRIEND_SELECTION_COUNT",
     "TIME_POINT",

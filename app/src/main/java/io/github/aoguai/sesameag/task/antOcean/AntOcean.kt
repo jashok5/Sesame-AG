@@ -52,10 +52,6 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.util.HashSet
 
-/**
- * @author Constanline
- * @since 2023/08/01
- */
 class AntOcean : ModelTask() {
     /**
      * 申请动作枚举
@@ -838,6 +834,43 @@ class AntOcean : ModelTask() {
         }
     }
 
+    private fun appraiseAiFish() {
+        var earned = 0
+        val attempted = mutableSetOf<String>()
+        try {
+            while (!io.github.aoguai.sesameag.hook.ApplicationHookConstants.isOffline() && !Thread.currentThread().isInterrupted) {
+                val response = JSONObject(AntOceanRpcCall.queryNeedAppraiseFishList())
+                if (!ResChecker.checkRes(TAG, "AI翻牌列表查询失败:", response)) return
+                if (response.has("appraiseRewardRemainNum") && response.optInt("appraiseRewardRemainNum") <= 0) break
+                val fishes = response.getJSONArray("fishList")
+                var acted = false
+                for (index in 0 until fishes.length()) {
+                    val fish = fishes.getJSONObject(index)
+                    if (fish.optJSONObject("appraiseVO")?.optBoolean("canAppraise") != true) continue
+                    val identity = "${fish.getString("seasonId")}:${fish.getString("imageId")}:${fish.getString("userId")}"
+                    if (!attempted.add(identity)) continue
+                    val result = JSONObject(AntOceanRpcCall.fishAppraise(fish))
+                    if (!ResChecker.checkRes(TAG, "AI翻牌失败:", result)) return
+                    val rewards = result.optJSONArray("appraiseRewardList")
+                    val amount = (0 until (rewards?.length() ?: 0)).sumOf { i ->
+                        val info = rewards?.optJSONObject(i)?.optJSONObject("extInfo")
+                        if (info?.optString("rewardType") == "energy") info.optJSONObject("popup")?.optInt("rightsNums") ?: 0 else 0
+                    }
+                    earned += amount
+                    acted = true
+                    if (amount <= 0 || (result.has("appraiseRewardRemainNum") &&
+                            result.optInt("appraiseRewardRemainNum") <= 0)) return
+                }
+                if (!acted) break
+            }
+        } finally {
+            if (earned > 0) {
+                Log.ocean("AI翻牌获得绿色能量${earned}g")
+                markOceanHomeRefreshNeeded()
+            }
+        }
+    }
+
     private suspend fun runAiFish() {
         try {
             val statusJo = queryAiFishStatus() ?: return
@@ -859,10 +892,12 @@ class AntOcean : ModelTask() {
             }
 
             touchAiFish(homeJo)
+            appraiseAiFish()
             if (aiFishExchangeCertificate?.value == true) {
                 exchangeAiFishCertificates()
             }
         } catch (t: Throwable) {
+            if (t is CancellationException || t is InterruptedException) throw t
             Log.runtime(TAG, "runAiFish err:")
             Log.printStackTrace(TAG, t)
         }
@@ -1011,7 +1046,7 @@ class AntOcean : ModelTask() {
 
     private fun runAiFishTaskFlow(): TaskFlowRunResult? =
         try {
-            TaskFlowEngine(AiFishTaskFlowAdapter(), roundSleepMs = 500L).run()
+            TaskFlowEngine(AiFishTaskFlowAdapter(), roundSleepMs = 425L).run()
         } catch (t: Throwable) {
             Log.runtime(TAG, "runAiFishTaskFlow err:")
             Log.printStackTrace(TAG, t)
@@ -2121,7 +2156,7 @@ class AntOcean : ModelTask() {
             val adapter = OceanTaskFlowAdapter()
             val result = TaskFlowEngine(
                 adapter = adapter,
-                roundSleepMs = 500L,
+                roundSleepMs = 425L,
                 executionState = oceanTaskExecutionState,
             ).run()
             if (!result.stopped && !result.interrupted && adapter.canMarkTasksDoneForToday()) {
@@ -2489,7 +2524,7 @@ class AntOcean : ModelTask() {
         }
 
         override fun onQueryFailed(response: JSONObject) {
-            Log.ocean("查询任务列表失败：" + extractOceanTaskFailureMessage(response))
+            logError("$flowName[任务查询失败] reason=${extractOceanTaskFailureMessage(response)} raw=$response")
         }
 
         override fun onUnknownPhase(
@@ -3515,8 +3550,8 @@ class AntOcean : ModelTask() {
                     if (ResChecker.checkRes(TAG, exchangeResultObj)) {
                         // 输出日志信息
                         Log.ocean("神奇海洋🏖️[万能拼图]制作${exchangeNum}张,剩余${exchangedPieceNum}张碎片")
-                        // 制作完成后休眠1秒钟
-                        delay(1000)
+                        // 连续兑换之间随机停顿
+                        delay(RandomUtil.nextLong(850, 1001))
                     }
                 } else {
                     // 如果未成功获取道具列表，停止循环
